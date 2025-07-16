@@ -2,3 +2,4 @@ Flask
 requests
 python-dotenv
 pdf2image
+flask_cors
