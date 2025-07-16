@@ -1,21 +1,25 @@
 import os
 import re
-from flask import Flask, request, render_template, jsonify
-from flask_cors import CORS
+from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
 import requests
+from dotenv import load_dotenv
+from flask_cors import CORS
+
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
 UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-from dotenv import load_dotenv
-load_dotenv()
 
 API_KEY = os.getenv('OCR_API_KEY')
 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+
+# ----------------------- OCR + Extraction Utilities -----------------------
 
 def ocr_space_api(image_path):
     with open(image_path, 'rb') as f:
@@ -54,7 +58,6 @@ def extract_dob(text):
 
 def extract_name(text, card_number, card_type):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    
     if card_type == 'pan':
         for i, line in enumerate(lines):
             if card_number in line:
@@ -95,57 +98,59 @@ def extract_fathers_name(text):
                     return possible_name
     return "Not Found"
 
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    result = {}
-    error = None
+# ----------------------- Routes -----------------------
 
-    if request.method == 'POST':
-        if request.content_type.startswith('multipart/form-data'):
-            file = request.files.get('file')
-            if not file:
-                error = "Please upload a file."
-                return jsonify({'error': error}), 400
+@app.route('/', methods=['GET'])
+def health_check():
+    return jsonify({"status": "ok", "message": "Server is running"}), 200
 
-            filename = secure_filename(file.filename)
-            ext = os.path.splitext(filename)[1].lower()
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
+@app.route('/upload', methods=['POST'])
+def upload():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
 
-            if ext in ['.jpg', '.jpeg', '.png']:
-                image_path = filepath
-            else:
-                error = "Unsupported file format. Please upload a JPG, JPEG, or PNG file."
-                return jsonify({'error': error}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "Empty file"}), 400
 
-            text = ocr_space_api(image_path)
-            aadhaar = extract_aadhaar(text)
-            pan = extract_pan(text)
-            dob = extract_dob(text)
+    filename = secure_filename(file.filename)
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ['.jpg', '.jpeg', '.png']:
+        return jsonify({"error": "Unsupported file format. Use JPG, JPEG or PNG."}), 400
 
-            if aadhaar:
-                name = extract_name(text, aadhaar, 'aadhaar')
-                result = {
-                    'Card Type': 'Aadhaar',
-                    'Aadhaar Number': aadhaar,
-                    'Name': name or 'Not found',
-                    'Date of Birth': dob or 'Not found'
-                }
-            elif pan:
-                name = extract_name(text, pan, 'pan')
-                father_name = extract_fathers_name(text)
-                result = {
-                    'Card Type': 'PAN',
-                    'PAN Number': pan,
-                    'Name': name or 'Not found',
-                    'Father\'s Name': father_name or 'Not found',
-                    'Date of Birth': dob or 'Not found'
-                }
-            else:
-                error = "Could not detect valid Aadhaar or PAN number."
-                return jsonify({'error': error}), 400
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
 
-            return jsonify({'data': result}), 200
+    text = ocr_space_api(filepath)
+    aadhaar = extract_aadhaar(text)
+    pan = extract_pan(text)
+    dob = extract_dob(text)
+
+    if aadhaar:
+        name = extract_name(text, aadhaar, 'aadhaar')
+        return jsonify({
+            "Card Type": "Aadhaar",
+            "Aadhaar Number": aadhaar,
+            "Name": name or 'Not found',
+            "Date of Birth": dob or 'Not found'
+        })
+
+    elif pan:
+        name = extract_name(text, pan, 'pan')
+        father_name = extract_fathers_name(text)
+        return jsonify({
+            "Card Type": "PAN",
+            "PAN Number": pan,
+            "Name": name or 'Not found',
+            "Father's Name": father_name or 'Not found',
+            "Date of Birth": dob or 'Not found'
+        })
+
+    else:
+        return jsonify({"error": "Could not detect valid Aadhaar or PAN number."}), 422
+
+# ----------------------- Main Entry -----------------------
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
