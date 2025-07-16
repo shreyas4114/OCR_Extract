@@ -35,7 +35,7 @@ const UploadPage = () => {
     formData.append('username', 'test_user');
 
     try {
-      const res = await axios.post('https://ocr-extract-h1qh.onrender.com/upload', formData, {
+      const res = await axios.post('http://127.0.0.1:5000/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
